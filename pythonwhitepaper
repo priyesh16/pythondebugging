@@ -1,0 +1,370 @@
+This paper presents different tools one could use while debugging python code
+especially in Solaris 11+. 
+
+Python itselfs comes with several tools, while others can be installed. This
+paper will also talk about how to dtrace python code. Some of the tools that
+will be discussed briefly are:
+
+1) Python Interactive Shell
+2) Python Debugger or PDB
+3) Python Introspection
+4) PyCallGraph
+5) Profilers - CProfile and Timeit
+6) Dtracing Python
+
+
+Throughout the paper I will be using one sample program and debugging it with
+the tools I mentioned above.  The sample program is named "introspect.py".
+The program prints all classes, its methods and functions defined in a python
+file and their documentation if provided. 
+
+For example if I wanted to know what all modules, methods and functions are used
+within this sample program. I could run python introspect.py introspect . Also
+if I wanted to introspect our pkg command. I could do a ./introspect.py
+pkg.client. I did a pkg.client instead of pkg because pkg is a package and not a
+module client is a module inside pkg and this program takes only modules.
+
+#! /usr/bin/env python 
+import sys
+import pdb
+import types
+import inspect
+import imp
+
+def whatsin(object, spaces=15): 
+	"""Prints userdefined classes its methods and functions. Takes modules"""
+
+	modulename = (type(object) == types.ModuleType) and object.__name__ or object;
+	module = importmodule(modulename)
+
+	objectDict = dict((name,obj) for name,obj in inspect.getmembers(module) if callable(obj))
+	for name, obj in objectDict.iteritems():
+		print "-".ljust(80,"-")
+		prettyprint("", name, obj, spaces)
+		if isinstance(obj, type):
+			methodDict = dict((methodname,method) for methodname,method in
+				inspect.getmembers(obj) if callable(method))
+			for methodname, method in methodDict.iteritems():
+				prettyprint("-->".rjust(spaces), methodname, method, spaces)
+	print "-".ljust(80,"-")
+
+def importmodule(name):
+	"""Imports given module (even hierarchical module names)"""
+	path = None;
+	for part in name.split('.'):
+		if path is not None:
+			path=[path]
+		file, path, descr = imp.find_module(part, path)
+		res = imp.load_module(part, file, path, descr)
+	return res
+
+def prettyprint(start, name, obj, spaces):
+	"""print required text prettily"""
+	print '%s%s%s%s%s' % ( start, name.ljust(spaces),
+			str(type(obj)).ljust(spaces) , "\n\t", 
+			str(obj.__doc__).replace("\n", "\n\t").rjust(spaces))
+
+if __name__ == "__main__":
+	argv = sys.argv
+
+	if len(sys.argv) < 2 or len(sys.argv) > 3:
+		print "./introspect <module name> [spaces]"
+		sys.exit(1) 
+
+	if len(sys.argv) == 3:
+		argv[2] = int(sys.argv[2]) 
+	else: 
+		argv.append(15);
+		whatsin(argv[1], argv[2])
+
+1) Python interactive shell
+
+Typing just python in the command line invokes a python interpretter. One can
+use the interpreter to test python statments, functions etc.. This is very
+useful while developing. With this interpretter  can unit test sub programs effectively. 
+
+
+You can use python as a calculator also for example
+
+5 * 5.0 / 345
+or even complex numbers
+1j * 1j
+
+it can compare strings also
+'this' > 'that'
+
+One can import modules by doing an import <module>
+For example,
+import sys
+sys.path
+
+
+I wont be demo'ing more about python's interactive shell as throughout this
+paper I will be using the python interpretter for debugging and introspecting.
+
+2) Pdb Python debugger
+
+python -m pdb introspect.py
+--> Three ways to import pdb
+There are multiple ways to invoke pdb module
+
+python -m pdb introsect.py is one way to invoke pdb
+
+pdb has similar debugger commands to gdb
+
+l for listing source code for the current file
+n to execute next line
+r to run with args
+p to print values
+s to single step within a function
+
+another way is to invoke through the interpreter
+
+
+oracle@pri-ThinkPad-T420:~/Desktop/python_demo$ python
+Python 2.7.6 (default, Mar 22 2014, 22:59:56) 
+[GCC 4.8.2] on linux2
+Type "help", "copyright", "credits" or "license" for more information.
+>>> import pdb
+>>> import introspect
+>>> from introspect import *
+>>> 
+>>> pdb.run("introspect.whatsin(introspect)")
+(Pdb) b whatsin
+(Pdb) b prettyprint
+Breakpoint 2 at /home/oracle/Desktop/python_demo/introspect.py:35
+(Pdb) b
+Num Type         Disp Enb   Where
+1   breakpoint   keep yes   at /home/oracle/Desktop/python_demo/introspect.py:8
+2   breakpoint   keep yes   at /home/oracle/Desktop/python_demo/introspect.py:35
+(Pdb) disable 2
+(Pdb) b
+Num Type         Disp Enb   Where
+1   breakpoint   keep yes   at /home/oracle/Desktop/python_demo/introspect.py:8
+2   breakpoint   keep no    at /home/oracle/Desktop/python_demo/introspect.py:35
+(Pdb) r
+> /home/oracle/Desktop/python_demo/introspect.py(11)whatsin()
+-> modulename = (type(object) == types.ModuleType) and object.__name__ or
+object;
+(Pdb) l
+7     
+8 B def whatsin(object, spaces=15): 
+9         """Prints userdefined classes its methods and functions. Takes
+modules"""
+10   
+11          modulename = (type(object) == types.ModuleType) and
+object.__name__ or object;
+12  ->     module = importmodule(modulename)
+13    
+14       objectDict = dict((name,obj) for name,obj in
+inspect.getmembers(module) if callable(obj))
+15          for name, obj in objectDict.iteritems():
+16             print "-".ljust(80,"-")
+17            prettyprint("", name, obj, spaces)
+(Pdb) p modulename
+'introspect'
+
+
+Another method to invoke pdb is to import pdb in the source code and then in the
+source code add the line pdb.set_trace() to the interested line.
+
+
+3) Introspect python
+
+Everything in python is an object, and because of this one can look at these
+objects, get information out of it and manuplate them. Introspecting is one of
+pythons strength.
+
+Let's try and understand the above code.
+
+The program takes two arguments one is the module to be introspected and the
+other is the spacing we want while indenting the documentation. The first
+argument which is the module to be introspected can be input either as a
+string type or a module type. With this we can now call the program in a shell
+(where argv is a string) and from the interpreter (where argv can be a module)
+
+oracle@pri-ThinkPad-T420:~/Desktop/python_demo$ ./introspect.py introspect
+
+
+oracle@pri-ThinkPad-T420:~/Desktop/python_demo$ python
+Python 2.7.6 (default, Mar 22 2014, 22:59:56) 
+[GCC 4.8.2] on linux2
+Type "help", "copyright", "credits" or "license" for more information.
+>>> import introspect 
+>>> from introspect import *
+>>> whatsin(introspect)
+
+In the program we first import the requested module. Figure out all the classes and
+functions present in the program and then if an object is of class type then it
+finds out all the methods in the class. Once we get these objects, we print out
+the documentation in the source code if available.
+
+Let's look at some of the introspection functions used in this program.
+
+First, based on how the user input the module we try to extract the module name
+from the input. For that we have to first check if the module given is a string
+type or a module type. For that we use the python's type function.
+
+>>> type("45")
+<type 'str'>
+>>> type(45)
+<type 'int'>
+>>> type(introspect)
+<type 'module'>
+
+The and or in python can be used as conditional statement. So if the argument
+input is of module type we figure out the string from it or else we use the
+string as it is from the input.
+
+Here object.__name__ gives the stringized form of the object.
+>>> introspect
+<module 'introspect' from 'introspect.pyc'>
+>>> introspect.__name__
+'introspect'
+
+If you are curious about what other such objects are contained in the introspect
+module you could use another introspecting dir() function
+>>> dir(introspect)
+['__builtins__', '__doc__', '__file__', '__name__', '__package__', 'imp',
+'importmodule', 'inspect', 'pdb', 'prettyprint', 'sys', 'types', 'whatsin']
+
+So once we have the module name we import the module. To import modules of the
+form pkg.module I have added this recursive function.
+
+Now once we have the module imported, we have to find out what are all members
+inside the module. For this we use the inspect.getmembers() function. It lists
+out the members as well as the type of the members. Since we are only interested
+in classes, functions and methods of these members we can use another
+introspecting function namely callable. 
+
+>>> callable(whatsin)
+True
+>>> callable(__debug__)
+False
+
+So we have now filtered out classes and functions. We print out the
+documentation for them. Now we further filter out classes from them. This is to
+get info about the methods in a class. To filter out classes we use another
+introspecting function called isinstance.
+>>> isinstance(5, int)
+True
+>>> isinstance("5", str)
+True
+
+Again once we get the methods of the classes we print out the documentation if
+available.
+
+
+
+['__builtins__', '__doc__', '__file__', '__name__', '__package__', 'imp',
+'importmodule', 'inspect', 'pdb', 'prettyprint', 'sys', 'types', 'whatsin']
+
+The program accepts kinds of arguments modules either as a string or a module.
+Thus 
+
+The code is trying to 
+For example 
+import introspect
+dir(introspect)
+shows all the objects inside introspect module.
+
+The sample program above uses such introspecting functions to gather information about a module.
+
+>>> isinstance("prettyprint",str)
+True
+>>> isinstance(5,int)
+True
+>>> isinstance(True, bool)
+True
+>>> 
+
+4) PycallGraph
+
+PycallGraph is a module that creates call graph visualisation of your code.
+PycallGraph uses various tools like Graphviz and Gephi to provide the static
+visualization. It also provides many other features and customization options,
+like ability to visually group modules together and colour customizibility among
+others. 
+
+I have written a python script to invoke PyCallGraph for introspect.py using
+graphviz output. As you can see it is very easy to get the callgraph. All one
+has to do is import pycallgraph and the module we are interested in. Then with
+PyCallGraph() function call the function that would give a call stack
+
+callgraph.py --graphviz  -- ./introspect.py introspect
+
+5) Profilers - CProfile and Timeit
+
+Python has many modules that can be helpful to profile your code. One such
+module is the timeit module. To demonstrate, I will use an example of printing a
+string from 0 to 100 with dashes in between.
+
+So first I will import the timeit module. Now I will print 0 then a - and then 2
+and then a - etc..
+
+Now I will use list comprehension instead where I first compute 1 to 100 and
+then add dashes in between.
+
+bash-4.1$ python
+Python 2.7.3 (default, Aug 30 2012, 01:57:35) [C] on sunos5
+Type "help", "copyright", "credits" or "license" for more information.
+>>> import timeit
+>>> "-".join(str(n) for n in
+>>> range(100))
+'0-1-2-3-4-5-6-7-8-9-10-11-12-13-14-15-16-17-18-19-20-21-22-23-24-25-26-27-28-29
+-30-31-32-33-34-35-36-37-38-39-40-41-42-43-44-45-46-47-48-49-50-51-52-53-54-55-
+56-57-58-59-60-61-62-63-64-65-66-67-68-69-70-71-72-73-74-75-76-77-78-79-80-81-82
+-83-84-85-86-87-88-89-90-91-92-93-94-95-96-97-98-99'
+>>> "-".join([str(n) for n in range(100)])
+'0-1-2-3-4-5-6-7-8-9-10-11-12-13-14-15-16-17-18-19-20-21-22-23-24-25-26-27-28-29
+-30-31-32-33-34-35-36-37-38-39-40-41-42-43-44-45-46-47-48-49-50-51-52-53-54-55-
+56-57-58-59-60-61-62-63-64-65-66-67-68-69-70-71-72-73-74-75-76-77-78-79-80-81-82
+-83-84-85-86-87-88-89-90-91-92-93-94-95-96-97-98-99'
+>>> "-".join(map(str, range(100)))
+'0-1-2-3-4-5-6-7-8-9-10-11-12-13-14-15-16-17-18-19-20-21-22-23-24-25-26-27-28-29
+-30-31-32-33-34-35-36-37-38-39-40-41-42-43-44-45-46-47-48-49-50-51-52-53-54-55-
+56-57-58-59-60-61-62-63-64-65-66-67-68-69-70-71-72-73-74-75-76-77-78-79-80-81-82
+-83-84-85-86-87-88-89-90-91-92-93-94-95-96-97-98-99'
+>>> timeit.timeit("-".join(str(n) for n in range(100)), number=1000)
+0.0033249855041503906
+>>> timeit.timeit("-".join([str(n) for n in range(100)]), number=1000)
+0.005800962448120117
+>>> timeit.timeit("-".join(map(str, range(100))), number=1000)
+0.005959987640380859
+
+Another module with which we can profile is CProfile.
+
+In dumbprofile.py I have written a python script to profile introspect.py. Using
+cProfile is very easy and intuitive. Basically get an instance of cProfile class
+and then within enable and disable of the instance write the code you want to
+sort the profiled data based on the number of calls.
+
+python dumpprofile.py | egrep 'introspect.py|call'
+
+By default cProfile profiles to the 1000th of a second, I haven't figured out 
+how to increase the scale factor. But I have run this in a for loop and tested
+it works. 
+
+But we can compare atleast the total count to the one we got through pycallstack
+and notice that they are similar.
+
+6) Dtracing Python
+
+Solaris provides plenty of dtrace probes for libpython. 
+
+sudo dtrace -l -P python*
+
+I have written a dscript to print timestamps and to get total no of calls for
+each function in introspect.py. 
+
+Some interesting probes are function-entry and function-return. As the name
+suggests these probes get hit on entry and exit of a function. Also, while
+dtracing python probes arg0 represents the filename, arg1 the function name and 
+arg2 contains the line number.
+
+If you look at the callstack we can see how python calls the functions inside
+introspect.py and how the calls go back and forth libpython.so 
+
+Also I had printed out the timestamps and total count which is evinced from the
+output. We can compare that with the output we got through pycallstack and
+notice that they are similar.

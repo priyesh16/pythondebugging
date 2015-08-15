@@ -1,0 +1,40 @@
+--------------------------------------------------------------------------------
+importmodule   <type 'function'>
+	Imports given module (even hierarchical module names)
+--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+prettyprint    <type 'function'>
+	print required text prettily
+--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+whatsin        <type 'function'>
+	Prints userdefined classes its methods and functions. Takes modules
+--------------------------------------------------------------------------------
+
+              libpython2.7.so.1.0`dtrace_entry+0x55
+              libpython2.7.so.1.0`PyEval_EvalFrameEx+0x2ea3
+                [ ./introspect.py:25 (importmodule) ]
+              libpython2.7.so.1.0`fast_function+0x146
+              libpython2.7.so.1.0`call_function+0x96
+              libpython2.7.so.1.0`PyEval_EvalFrameEx+0x5dc
+                [ ./introspect.py:12 (whatsin) ]
+              libpython2.7.so.1.0`PyEval_EvalCodeEx+0x196
+              libpython2.7.so.1.0`fast_function+0x7e
+              libpython2.7.so.1.0`call_function+0x96
+              libpython2.7.so.1.0`PyEval_EvalFrameEx+0x5dc
+                [ ./introspect.py:52 (<module>) ]
+              libpython2.7.so.1.0`PyEval_EvalCodeEx+0x196
+              libpython2.7.so.1.0`PyEval_EvalCode+0x35
+              libpython2.7.so.1.0`run_mod+0x3d
+              libpython2.7.so.1.0`PyRun_SimpleFileExFlags+0x13b
+              libpython2.7.so.1.0`PyRun_AnyFileExFlags+0x41
+              libpython2.7.so.1.0`Py_Main+0x3c2
+              isapython2.7`main+0x66
+              isapython2.7`_start+0x7d
+FUNCTION NAME                  TOTAL TIME                     TOTAL COUNT                    
+  <genexpr>                      5861                           4                              
+  prettyprint                    16460                          3                              
+  importmodule                   90795831                       1                              
+  whatsin                        90879855                       1                              
+  <module>                       90888818                       2                              
+

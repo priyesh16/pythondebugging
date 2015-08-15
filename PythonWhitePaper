@@ -1,0 +1,496 @@
+This paper presents different tools one could use while debugging python code
+especially in Solaris 11+. 
+
+Python itselfs comes with several tools, while others can be installed. This
+paper will also talk about how to dtrace python code. Some of the tools that
+will be discussed briefly are:
+
+1) Python Interactive Shell
+2) Python Debugger or PDB
+3) Python Introspection
+4) PyCallGraph
+5) Profilers - CProfile and Timeit
+6) Dtracing Python
+
+
+Throughout the paper I will be using one sample program and debugging it with
+the tools I mentioned above.  The sample program is named "introspect.py".
+The program prints all classes, its methods and functions defined in a python
+file and their documentation if provided. 
+
+#! /usr/bin/env python 
+import sys
+import pdb
+import types
+import inspect
+import imp
+
+def whatsin(object, spaces=15): 
+	"""Prints userdefined classes its methods and functions. Takes modules"""
+
+	modulename = (type(object) == types.ModuleType) and object.__name__ or object;
+	module = importmodule(modulename)
+
+	objectDict = dict((name,obj) for name,obj in inspect.getmembers(module) if callable(obj))
+	for name, obj in objectDict.iteritems():
+		print "-".ljust(80,"-")
+		prettyprint("", name, obj, spaces)
+		if isinstance(obj, type):
+			methodDict = dict((methodname,method) for methodname,method in
+				inspect.getmembers(obj) if callable(method))
+			for methodname, method in methodDict.iteritems():
+				prettyprint("-->".rjust(spaces), methodname, method, spaces)
+	print "-".ljust(80,"-")
+
+def importmodule(name):
+	"""Imports given module (even hierarchical module names)"""
+	path = None;
+	for part in name.split('.'):
+		if path is not None:
+			path=[path]
+		file, path, descr = imp.find_module(part, path)
+		res = imp.load_module(part, file, path, descr)
+	return res
+
+def prettyprint(start, name, obj, spaces):
+	"""print required text prettily"""
+	print '%s%s%s%s%s' % ( start, name.ljust(spaces),
+			str(type(obj)).ljust(spaces) , "\n\t", 
+			str(obj.__doc__).replace("\n", "\n\t").rjust(spaces))
+
+if __name__ == "__main__":
+	argv = sys.argv
+
+	if len(sys.argv) < 2 or len(sys.argv) > 3:
+		print "./introspect <module name> [spaces]"
+		sys.exit(1) 
+
+	if len(sys.argv) == 3:
+		argv[2] = int(sys.argv[2]) 
+	else: 
+		argv.append(15);
+		whatsin(argv[1], argv[2])
+
+
+5) Profilers - CProfile and Timeit
+
+Python has many modules that can be helpful to profile your code. One such
+module is the timeit module. To demonstrate, I will use an example of printing a
+string from 0 to 100 with dashes in between.
+
+So first I will import the timeit module. Now I will print 0 then a - and then 2
+and then a - etc..
+
+Now I will use list comprehension instead where I first compute 1 to 100 and
+then add dashes in between.
+
+bash-4.1$ python
+Python 2.7.3 (default, Aug 30 2012, 01:57:35) [C] on sunos5
+Type "help", "copyright", "credits" or "license" for more information.
+>>> import timeit
+>>> "-".join(str(n) for n in
+>>> range(100))
+'0-1-2-3-4-5-6-7-8-9-10-11-12-13-14-15-16-17-18-19-20-21-22-23-24-25-26-27-28-29
+-30-31-32-33-34-35-36-37-38-39-40-41-42-43-44-45-46-47-48-49-50-51-52-53-54-55-
+56-57-58-59-60-61-62-63-64-65-66-67-68-69-70-71-72-73-74-75-76-77-78-79-80-81-82
+-83-84-85-86-87-88-89-90-91-92-93-94-95-96-97-98-99'
+>>> "-".join([str(n) for n in range(100)])
+'0-1-2-3-4-5-6-7-8-9-10-11-12-13-14-15-16-17-18-19-20-21-22-23-24-25-26-27-28-29
+-30-31-32-33-34-35-36-37-38-39-40-41-42-43-44-45-46-47-48-49-50-51-52-53-54-55-
+56-57-58-59-60-61-62-63-64-65-66-67-68-69-70-71-72-73-74-75-76-77-78-79-80-81-82
+-83-84-85-86-87-88-89-90-91-92-93-94-95-96-97-98-99'
+>>> "-".join(map(str, range(100)))
+'0-1-2-3-4-5-6-7-8-9-10-11-12-13-14-15-16-17-18-19-20-21-22-23-24-25-26-27-28-29
+-30-31-32-33-34-35-36-37-38-39-40-41-42-43-44-45-46-47-48-49-50-51-52-53-54-55-
+56-57-58-59-60-61-62-63-64-65-66-67-68-69-70-71-72-73-74-75-76-77-78-79-80-81-82
+-83-84-85-86-87-88-89-90-91-92-93-94-95-96-97-98-99'
+>>> timeit.timeit("-".join(str(n) for n in range(100)), number=1000)
+0.0033249855041503906
+>>> timeit.timeit("-".join([str(n) for n in range(100)]), number=1000)
+0.005800962448120117
+>>> timeit.timeit("-".join(map(str, range(100))), number=1000)
+0.005959987640380859
+
+Another module with which we can profile is CProfile.
+
+In dumbprofile.py I have written a python script to profile introspect.py. Using
+cProfile is very easy and intuitive. Basically get an instance of cProfile class
+and then within enable and disable of the instance write the code you want to
+sort the profiled data based on the number of calls.
+
+python dumpprofile.py | egrep 'introspect.py|call'
+
+By default cProfile profiles to the 1000th of a second, I haven't figured out 
+how to increase the scale factor. But I have run this in a for loop and tested
+it works. 
+
+But we can compare atleast the total count to the one we got through pycallstack
+and notice that they are similar.
+
+6) Dtracing Python
+
+Solaris provides plenty of dtrace probes for libpython. 
+
+sudo dtrace -l -P python*
+
+I have written a dscript to print timestamps and to get total no of calls for
+each function in introspect.py. 
+
+Some interesting probes are function-entry and function-return. As the name
+suggests these probes get hit on entry and exit of a function. Also, while
+dtracing python probes arg0 represents the filename, arg1 the function name and 
+arg2 contains the line number.
+
+If you look at the callstack we can see how python calls the functions inside
+introspect.py and how the calls go back and forth libpython.so 
+
+Also I had printed out the timestamps and total count which is evinced from the
+output. We can compare that with the output we got through pycallstack and
+notice that they are similar.
+
+>>> timeit.timeit("-".join(str(n)
+>>> for
+>>> n
+>>> in
+>>> range(100)))
+^CTraceback
+(most
+recent
+call
+last):
+File
+"<stdin>",
+line
+1,
+in
+<module>
+  File
+  "/usr/lib/python2.7/timeit.py",
+  line
+  230,
+  in
+  timeit
+	  return
+	  Timer(stmt,
+	  setup,
+	  timer).timeit(number)
+		File
+		"/usr/lib/python2.7/timeit.py",
+		line
+		195,
+		in
+		timeit
+			timing
+			=
+			self.inner(it,
+			self.timer)
+			  File
+			  "<timeit-src>",
+			  line
+			  6,
+			  in
+			  inner
+			  KeyboardInterrupt
+			  >>> timeit.timeit("-".join(str(n)
+			  >>> for
+			  >>> n
+			  >>> in
+			  >>> range(100)),
+			  >>> number=1000)
+			  0.0059850215911865234
+			  >>> "-".join([str(n)
+			  >>> for
+			  >>> n
+			  >>> in
+			  >>> range(100)]))
+				File
+				"<stdin>",
+				line
+				1
+					"-".join([str(n)
+					for
+					n
+					in
+					range(100)]))
+															  ^
+															  SyntaxError:
+															  invalid
+															  syntax
+															  >>> "-".join([str(n)
+															  >>> for
+															  >>> n
+															  >>> in
+															  >>> range(100)])
+															  '0-1-2-3-4-5-6-7-8-9-10-11-12-13-14-15-16-17-18-19-20-21-22-23-24-25-26-27-28-29-30-31-32-33-34-35-36-37-38-39-40-41-42-43-44-45-46-47-48-49-50-51-52-53-54-55-56-57-58-59-60-61-62-63-64-65-66-67-68-69-70-71-72-73-74-75-76-77-78-79-80-81-82-83-84-85-86-87-88-89-90-91-92-93-94-95-96-97-98-99'
+															  >>> timeit.timeit("-".join([str(n)
+															  >>> for
+															  >>> n
+															  >>> in
+															  >>> range(100)]),
+															  >>> number=1000)
+															  0.006011009216308594
+															  >>> timeit.timeit("-".join([str(n)
+															  >>> for
+															  >>> n
+															  >>> in
+															  >>> range(100)]),
+																											  >>> number=1000)
+																											  0.0020821094512939453
+																											  >>> 
+
+
+
+
+
+		------------timeit-----------
+		import timeit
+
+		"-".join(str(n) for n in
+		range(100))
+		timeit.timeit('"-".join(str(n)
+		for n in range(100))',
+		number=1000)
+
+		"-".join([str(n) for n
+		in range(100)])
+		timeit.timeit('"-".join([str(n)
+														for n in range(100)])',
+														number=1000)
+
+														"-".join(map(str,
+														range(100)))
+														timeit.timeit("-".join(map(str,
+														range(100))),
+														number=1000)
+
+														----------profiler---------------
+														python dumpprof.py  |
+														egrep
+														'introspect|lineno'
+
+   --> Three ways to import pdb
+
+   python
+   >>> import pdb
+   >>> import mymodule
+   >>> pdb.run('mymodule.test()')
+   > <string>(0)?()
+   (Pdb) continue
+   > <string>(1)?()
+   (Pdb) continue
+   NameError: 'spam'
+   > <string>(1)?()
+   (Pdb)
+
+   import pdb; 
+   pdb.set_trace()
+
+   bash-4.1$ python
+   Python 2.7.3 (default, Aug 30 2012, 01:57:35) [C] on sunos5
+   Type "help", "copyright", "credits" or "license" for more information.
+   >>> import test
+   >>> from test import Calculator
+   >>> obj = Calculator()
+   >>> obj.subtract(5,6)
+   > /home/pri/Desktop/python_preso/test.py(16)subtract()
+   -> print "The result of" + repr(a) + "-" + repr(b) + "is"
+   (Pdb) l
+    11			   return (a)+(b);
+	 12		
+	  13	   def subtract(self, a, b):
+	   14		   '''This function subtracts two numbers'''
+	    15			   pdb.set_trace();
+		 16  ->		   print "The result of" + repr(a) + "-" + repr(b) + "is" 
+		  17		   return self.add(a, -(b))
+		   18	
+		    19		def multiply(a, b):
+			 20			'''This function multiplies two numbers'''
+			  21		return (a)*(b);
+			  (Pdb) b Calculator.add
+			  Breakpoint 1 at /home/pri/Desktop/python_preso/test.py:9
+			  (Pdb) c
+			  The result of5-6is
+			  > /home/pri/Desktop/python_preso/test.py(11)add()
+			  -> return (a)+(b);
+			  (Pdb) u
+			  > /home/pri/Desktop/python_preso/test.py(17)subtract()
+			  -> return self.add(a, -(b))
+			  (Pdb) s
+			  --Return--
+			  > /home/pri/Desktop/python_preso/test.py(11)add()->-1
+			  -> return (a)+(b);
+
+
+
+
+			  python -m pdb test.py
+
+			  bash-4.1$ python
+			  Python 2.6.8 (unknown, Aug 30 2012, 01:56:38) [C] on sunos5
+			  Type "help", "copyright", "credits" or "license" for more
+			  information.
+			  >>> import test
+			  >>> from test import *
+
+			  >>> dir(test)
+			  ['Calculator', '__builtins__', '__doc__', '__file__', '__name__',
+			  '__package__', 'info', 'multiply', 'os', 'sys']
+
+			  >>> info(test)
+			  Calculator This class defines two methods add and subtract
+			  info       Print methods and doc strings. Takes module, class,
+			  list, dictionary, or string.
+			  multiply   This function multiplies two numbers
+			  >>> info(Calculator)
+			  add        This function adds two numbers
+			  subtract   This function subtracts two numbers
+
+
+			  >>> from pkg.client import global_settings
+			  >>> info(global_settings)
+
+
+
+			  (02:13:16 PM) priyesh:  pkg set-mediator -V 2.7 python
+
+			  (02:13:24 PM) priyesh: root@supertramp:~# python -V
+			  Python 2.6.8
+			  root@supertramp:~# pkg set-mediator -V 2.7 python
+			              Packages to update:  8
+						             Mediators to change:  1
+									        Create boot environment: No
+											Create backup boot environment: No
+
+											PHASE
+											ITEMS
+											Removing old actions
+											4/4
+											Updating modified actions
+											12/12
+											Updating image state
+											Done 
+											Creating fast lookup database
+											Done 
+											Reading search index
+											Done 
+											Updating search index
+											8/8 
+											root@supertramp:~# python -V
+											\Python 2.7.3
+											root@supertramp:~# 
+
+
+											export PYTHON=/usr/bin/python2.6
+											 export
+											 'CPPFLAGS=-I/usr/xpg4/include
+											 -I/usr/include/python2.6'
+											  export 'CFLAGS=-i -xO4 -xspace
+											  -xstrconst -xpentium -mr
+											  -xregs=no%frameptr
+											  -I/usr/xpg4/include -I/usr/include
+											  -I/usr/include/python2.6'
+											   export 'RPM_OPT_FLAGS=-i -xO4
+											   -xspace -xstrconst -xpentium -mr
+											   -xregs=no%frameptr
+											   -I/usr/xpg4/include
+											   -I/usr/include
+											   -I/usr/include/python2.6'
+											    export 'LDFLAGS=  -Wl,-zignore
+												-Wl,-zcombreloc -Wl,-Bdirect '
+												 export
+												 PYCC_CC=/opt/solarisstudio12.3/bin/cc
+												  export
+												  PYCC_CXX=/opt/solarisstudio12.3/bin/CC
+
+												  export
+												  PYTHON=/usr/bin/python2.7
+												   export
+												   'CPPFLAGS=-I/usr/xpg4/include
+												   -I/usr/include/python2.7'
+												    export 'CFLAGS=-i -xO4
+													-xspace -xstrconst -xpentium
+													-mr -xregs=no%frameptr
+													-I/usr/xpg4/include
+													-I/usr/include
+													-I/usr/include/python2.7'
+													 export 'RPM_OPT_FLAGS=-i
+													 -xO4 -xspace -xstrconst
+													 -xpentium -mr
+													 -xregs=no%frameptr
+													 -I/usr/xpg4/include
+													 -I/usr/include
+													 -I/usr/include/python2.7'
+													  export 'LDFLAGS=
+													  -Wl,-zignore
+													  -Wl,-zcombreloc
+													  -Wl,-Bdirect '
+													   export
+													   PYCC_CC=/opt/solarisstudio12.3/bin/cc
+													    export
+														PYCC_CXX=/opt/solarisstudio12.3/bin/CC
+
+
+														---------> Dtrace and
+														python/qpri/python-dtrace-0.0.7
+
+														sudo dtrace -l -P pyth\*
+														sudo dtrace -n
+														'python*:::function-entry
+														{printf("%s\n",
+														copyinstr(arg0))}'
+														dtrace toolkit py_flow.d
+
+
+
+														sudo pkg set-publisher
+														-g
+														http://ipkg.us.oracle.com/solarisstudio/support/
+														solarisstudio
+
+
+														ssh
+														pvakayil@rangabhoomi.in.oracle.com
+														-->
+														root@S12-58:/qpri/python-dtrace-0.0.7#
+														export
+														PYTHONPATH=$PYTHONPATH:`pwd`
+														export
+														PYTHONPATH=$PYTHONPATH:/qpri/python-dtrace-0.0.7:/qpri/python-dtrace-0.0.7/examples/
+
+														export
+														PYTHONPATH=$PYTHONPATH:
+														export
+														PYTHONPATH=$PYTHONPATH:/usr/lib/python2.6/vendor-packages/
+
+
+														----------> py call
+														graph
+
+														pytexas 2013 
+														--->profile
+
+														---------> word
+														instrument
+
+
+														---------------intorspection---------
+														import introspect
+														from introspect import *
+														test = Introspect()
+														test.info(introspect)
+
+														import pkg
+														import pkg.client
+														from introspect import *
+														import introspect
+														whatsin(pkg.client)
+
+
+
+
+
+
+
+
+
+
